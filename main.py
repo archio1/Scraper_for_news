@@ -1,8 +1,12 @@
-import csv
 import json
+import requests
+import csv
 from newspaper import Config, Article
 from newspaper.utils import BeautifulSoup
+from datetime import datetime
 
+HEADERS = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:78.0) Gecko/20100101 Firefox/78.0',
+           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'}
 
 def extract_author(article):
     # Check for author information from various possible tags
@@ -21,7 +25,13 @@ def extract_author(article):
         except json.JSONDecodeError:
             pass
 
-    # If author not found, return None
+    return None
+
+def extract_category(article):
+    # Check for category information from various possible tags
+    for tag in ['category', 'news_keywords', 'og:section', 'article:section']:
+        if tag in article.meta_data:
+            return article.meta_data[tag]
     return None
 
 def extract_article_info(url):
@@ -37,7 +47,7 @@ def extract_article_info(url):
     publish_date = article.publish_date
     body = article.text
     authors = extract_author(article)
-
+    category = extract_category(article)
 
     return {
         'Title': title,
@@ -45,22 +55,44 @@ def extract_article_info(url):
         'Author': authors,
         'Body': body,
         'Link': url,
+        'Category': category
     }
 
+def get_article_urls(target_date):
+    base_url = 'https://tsn.ua'
+    article_urls = []
 
-tsn_urls = [
-    'https://tsn.ua/tsikavinki/hlopchik-upiymav-ribu-z-idealnimi-lyudskimi-zubami-foto-2374234.html',
-    # Add more URLs here
-]
+    response = requests.get(base_url, headers=HEADERS, allow_redirects=True, verify=True, timeout=30)
+    soup = BeautifulSoup(response.content, 'html.parser')
 
+    for article in soup.find_all('article'):
+        date_elem = article.find('time')
+        if date_elem:
+            date_str = date_elem.get('datetime')
+            article_date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S%z').date()
 
-csv_filename = 'tsn_article.csv'
-fieldnames = ['Title', 'Date', 'Author', 'Body', 'Link']
+            if article_date == target_date.date():
+                link = article.find('a')['href']
+                article_urls.append(link)
 
-with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
+    return article_urls
 
-    for url in tsn_urls:
-        article_info = extract_article_info(url)
-        writer.writerow(article_info)
+def main():
+    target_date_str = "2023-07-21"
+    target_date = datetime.strptime(target_date_str, "%Y-%m-%d")
+
+    csv_filename = "article.csv"
+    fieldnames = ["Title", "Date", "Author", "Body", "Link", "Category"]
+
+    articles = get_article_urls(target_date)
+    with open(csv_filename, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for url in articles:
+            article_info = extract_article_info(url)
+            if article_info:  # Add a check to make sure article_info is not None
+                writer.writerow(article_info)
+
+if __name__ == "__main__":
+    main()
